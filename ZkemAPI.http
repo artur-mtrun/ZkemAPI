@@ -1,0 +1,6 @@
+@ZkemAPI_HostAddress = http://localhost:5123
+
+GET {{ZkemAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

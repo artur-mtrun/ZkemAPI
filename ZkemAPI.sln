@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.0.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ZkemAPI.Web", "ZkemAPI.Web\ZkemAPI.Web.csproj", "{9B39F5D4-85D7-4B96-B638-4FD45925C866}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ZkemAPI.Core", "ZkemAPI.Core\ZkemAPI.Core.csproj", "{37D66400-BD34-4C94-83CA-A5870AAD59A8}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ZkemAPI.SDK", "ZkemAPI.SDK\ZkemAPI.SDK.csproj", "{536E941E-B34B-42F5-85C3-7226B0FB96F6}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9B39F5D4-85D7-4B96-B638-4FD45925C866}.Debug|x86.ActiveCfg = Debug|x86
+		{9B39F5D4-85D7-4B96-B638-4FD45925C866}.Debug|x86.Build.0 = Debug|x86
+		{9B39F5D4-85D7-4B96-B638-4FD45925C866}.Release|x86.ActiveCfg = Release|x86
+		{9B39F5D4-85D7-4B96-B638-4FD45925C866}.Release|x86.Build.0 = Release|x86
+		{37D66400-BD34-4C94-83CA-A5870AAD59A8}.Debug|x86.ActiveCfg = Debug|x86
+		{37D66400-BD34-4C94-83CA-A5870AAD59A8}.Debug|x86.Build.0 = Debug|x86
+		{37D66400-BD34-4C94-83CA-A5870AAD59A8}.Release|x86.ActiveCfg = Release|x86
+		{37D66400-BD34-4C94-83CA-A5870AAD59A8}.Release|x86.Build.0 = Release|x86
+		{536E941E-B34B-42F5-85C3-7226B0FB96F6}.Debug|x86.ActiveCfg = Debug|x86
+		{536E941E-B34B-42F5-85C3-7226B0FB96F6}.Debug|x86.Build.0 = Debug|x86
+		{536E941E-B34B-42F5-85C3-7226B0FB96F6}.Release|x86.ActiveCfg = Release|x86
+		{536E941E-B34B-42F5-85C3-7226B0FB96F6}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

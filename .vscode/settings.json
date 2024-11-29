@@ -1,0 +1,9 @@
+{
+    "omnisharp.enableRoslynAnalyzers": true,
+    "omnisharp.enableEditorConfigSupport": true,
+    "dotnet.defaultSolution": "ZkemAPI.sln",
+    "files.exclude": {
+        "**/bin": true,
+        "**/obj": true
+    }
+} 
