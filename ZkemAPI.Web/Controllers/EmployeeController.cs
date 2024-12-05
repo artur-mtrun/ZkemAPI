@@ -515,32 +515,32 @@ namespace ZkemAPI.Web.Controllers
 
     public class GetEmployeeRequest
     {
-        public string IpAddress { get; set; }
-        public int Port { get; set; }
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
         public int DeviceNumber { get; set; } = 1;
-        public string EnrollNumber { get; set; }
+        public required string EnrollNumber { get; set; }
     }
 
     public class DeviceRequest
     {
-        public string IpAddress { get; set; }
-        public int Port { get; set; }
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
         public int DeviceNumber { get; set; } = 1;
     }
 
     public class EmployeeRequest : DeviceRequest
     {
-        public string EnrollNumber { get; set; }
-        public string Name { get; set; }
-        public string Password { get; set; }
-        public string CardNumber { get; set; }
+        public required string EnrollNumber { get; set; }
+        public  string? Name { get; set; }
+        public string? Password { get; set; }
+        public string? CardNumber { get; set; }
         public int Privilege { get; set; }
         public bool Enabled { get; set; } = true;
     }
 
     public class ChangeEnrollRequest : DeviceRequest
     {
-        public string OldEnrollNumber { get; set; }
-        public string NewEnrollNumber { get; set; }
+        public required string OldEnrollNumber { get; set; }
+        public required string NewEnrollNumber { get; set; }
     }
 } 

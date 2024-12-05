@@ -152,8 +152,8 @@ namespace ZkemAPI.Web.Controllers
 
     public class LogRequest
     {
-        public string IpAddress { get; set; }
-        public int Port { get; set; }
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
         public int DeviceNumber { get; set; } = 1;
     }
 } 
