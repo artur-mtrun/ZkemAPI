@@ -2,25 +2,64 @@ using System;
 using System.Threading.Tasks;
 using zkemkeeper;
 using ZkemAPI.Core.Interfaces;
+using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace ZkemAPI.SDK.Services
 {
     public class ZkemDevice : IZkemDevice
     {
         private readonly CZKEM _sdk;
+        private readonly ILogger<ZkemDevice> _logger;
 
         // Stałe wartości używane w różnych metodach
         private const int BACKUP_NUMBER_ALL = 11;
         private const int BACKUP_NUMBER_DEFAULT = 3;
 
-        public ZkemDevice()
+        public ZkemDevice(ILogger<ZkemDevice> logger)
         {
             _sdk = new CZKEM();
+            _logger = logger;
+            _logger.LogDebug("ZkemDevice SDK został zainicjalizowany");
         }
 
         // Połączenie
-        public bool Connect_Net(string IPAdd, int Port) => _sdk.Connect_Net(IPAdd, Port);
-        public void Disconnect() => _sdk.Disconnect();
+        public bool Connect_Net(string IPAdd, int Port)
+        {
+            _logger.LogDebug("Próba połączenia z czytnikiem {IPAddress}:{Port}", IPAdd, Port);
+            try
+            {
+                var result = _sdk.Connect_Net(IPAdd, Port);
+                if (result)
+                {
+                    _logger.LogInformation("Pomyślnie połączono z czytnikiem {IPAddress}:{Port}", IPAdd, Port);
+                }
+                else
+                {
+                    _logger.LogWarning("Nie udało się połączyć z czytnikiem {IPAddress}:{Port}", IPAdd, Port);
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Wyjątek podczas połączenia z czytnikiem {IPAddress}:{Port}", IPAdd, Port);
+                return false;
+            }
+        }
+        
+        public void Disconnect() 
+        {
+            _logger.LogDebug("Rozłączanie z czytnikiem");
+            try
+            {
+                _sdk.Disconnect();
+                _logger.LogInformation("Pomyślnie rozłączono z czytnikiem");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Błąd podczas rozłączania z czytnikiem");
+            }
+        }
 
         // Zarządzanie czasem
         public bool GetDeviceTime(int dwMachineNumber, ref int dwYear, ref int dwMonth, ref int dwDay, ref int dwHour, ref int dwMinute, ref int dwSecond)
@@ -256,12 +295,14 @@ namespace ZkemAPI.SDK.Services
         /// <summary>
         /// Pobiera rozszerzone informacje o użytkowniku wraz z numerem karty
         /// </summary>
-        public async Task<(bool success, string name, string password, int privilege, bool enabled, string cardNumber)> 
+        public (bool success, string name, string password, int privilege, bool enabled, string cardNumber) 
             GetUserInfoWithCard(int dwMachineNumber, string enrollNumber)
         {
             string name, password, cardNumber;
             int privilege;
             bool enabled;
+
+            _logger.LogDebug("Pobieranie informacji o użytkowniku {EnrollNumber} z urządzenia {DeviceNumber}", enrollNumber, dwMachineNumber);
 
             // Pobierz podstawowe informacje
             var success = SSR_GetUserInfo(dwMachineNumber, enrollNumber, out name, out password, out privilege, out enabled);
@@ -269,11 +310,22 @@ namespace ZkemAPI.SDK.Services
             // Pobierz numer karty
             if (success)
             {
+                _logger.LogDebug("Pobieranie numeru karty dla użytkownika {EnrollNumber}", enrollNumber);
                 success = GetStrCardNumber(out cardNumber);
+                if (success)
+                {
+                    _logger.LogDebug("Pomyślnie pobrano dane użytkownika {EnrollNumber}: {Name}, karta: {CardNumber}", 
+                        enrollNumber, name, cardNumber);
+                }
+                else
+                {
+                    _logger.LogWarning("Nie udało się pobrać numeru karty dla użytkownika {EnrollNumber}", enrollNumber);
+                }
             }
             else
             {
                 cardNumber = string.Empty;
+                _logger.LogWarning("Nie udało się pobrać informacji o użytkowniku {EnrollNumber}", enrollNumber);
             }
 
             return (success, name, password, privilege, enabled, cardNumber);
@@ -480,5 +532,61 @@ namespace ZkemAPI.SDK.Services
                 return false;
             }
         }
+
+        public bool ClearData(int dwMachineNumber, int dwValue)
+        {
+            try
+            {
+                return _sdk.ClearData(dwMachineNumber, dwValue);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Odtwarza sygnał dźwiękowy w czytniku
+        /// </summary>
+        /// <param name="delay">Czas trwania sygnału w milisekundach (standardowo 100-1000ms)</param>
+        /// <returns>True jeśli operacja się powiodła</returns>
+        public bool Beep(int delay)
+        {
+            try
+            {
+                return _sdk.Beep(delay);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Odtwarza komunikat głosowy w czytniku
+        /// </summary>
+        /// <param name="voiceIndex">Indeks komunikatu głosowego (0-9 dla standardowych komunikatów)</param>
+        /// <param name="length">Długość odtwarzania w milisekundach</param>
+        /// <returns>True jeśli operacja się powiodła</returns>
+        public bool PlayVoice(int voiceIndex, int length)
+        {
+            try
+            {
+                return _sdk.PlayVoice(voiceIndex, length);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Zapisuje plik audio (wave) do czytnika
+        /// </summary>
+        /// <param name="dwMachineNumber">Numer urządzenia (zwykle 1)</param>
+        /// <param name="fileName">Nazwa pliku (max 8 znaków + .wav)</param>
+        /// <param name="audioData">Dane pliku wave w formacie byte[]</param>
+        /// <returns>True jeśli operacja się powiodła</returns>
+
     }
 } 

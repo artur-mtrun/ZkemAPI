@@ -1,8 +1,9 @@
+using System;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using ZkemAPI.Core.Interfaces;
 using ZkemAPI.Core.Models;
-using System;
-using System.Collections.Generic;
+using ZkemAPI.SDK.Services;
 
 namespace ZkemAPI.Web.Controllers
 {
@@ -10,41 +11,59 @@ namespace ZkemAPI.Web.Controllers
     [Route("api/[controller]")]
     public class DeviceController : ControllerBase
     {
-        private readonly IZkemDevice _zkemDevice;
+        private readonly IDeviceConnectionManager _deviceManager;
 
-        public DeviceController(IZkemDevice zkemDevice)
+        public DeviceController(IDeviceConnectionManager deviceManager)
         {
-            _zkemDevice = zkemDevice;
+            _deviceManager = deviceManager;
         }
 
         [HttpGet("connect")]
-        public IActionResult TestConnection(string ip, int port = 4370)
+        public async Task<IActionResult> TestConnection(string ip, int port = 4370)
         {
             try
             {
-                bool connected = _zkemDevice.Connect_Net(ip, port);
-                
-                if (connected)
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(ip, port, device =>
                 {
-                    // Test połączenia poprzez pobranie czasu z urządzenia
-                    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-                    bool timeOk = _zkemDevice.GetDeviceTime(1, ref year, ref month, ref day, ref hour, ref minute, ref second);
+                    // Próba połączenia
+                    if (!device.Connect_Net(ip, port))
+                    {
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
+                    }
 
-                    var deviceTime = timeOk 
-                        ? $"Czas urządzenia: {year}-{month}-{day} {hour}:{minute}:{second}"
-                        : "Nie udało się pobrać czasu urządzenia";
+                    try
+                    {
+                        // Test podstawowego połączenia - sprawdzamy wersję firmware
+                        string version = "";
+                        bool success = device.GetFirmwareVersion(1, ref version);
+                        
+                        if (!success)
+                        {
+                            throw new InvalidOperationException("Połączenie nawiązane, ale nie można pobrać informacji z urządzenia");
+                        }
 
-                    return Ok(new { 
-                        status = "Połączono", 
-                        deviceTime 
-                    });
-                }
+                        return new { Version = version };
+                    }
+                    finally
+                    {
+                        device.Disconnect();
+                    }
+                });
 
-                return BadRequest("Nie udało się połączyć z urządzeniem");
+                return Ok(new
+                {
+                    Success = true,
+                    Message = $"Połączenie z czytnikiem {ip}:{port} nawiązane pomyślnie",
+                    Data = result
+                });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Błąd: {ex.Message}");
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = $"Błąd połączenia z czytnikiem {ip}:{port}: {ex.Message}"
+                });
             }
         }
 
@@ -53,83 +72,75 @@ namespace ZkemAPI.Web.Controllers
         {
             try
             {
-                _zkemDevice.Disconnect();
-                return Ok("Rozłączono");
+                return Ok(new
+                {
+                    Success = true,
+                    Message = "Rozłączenie wykonywane automatycznie po każdej operacji"
+                });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Błąd podczas rozłączania: {ex.Message}");
+                return BadRequest(new { Success = false, Message = ex.Message });
             }
         }
 
-        /// <summary>
-        /// Ustawia datę i czas w czytniku
-        /// </summary>
-        /// <param name="request">Parametry połączenia i nowa data</param>
-        /// <returns>Status operacji</returns>
         [HttpPost("set-time")]
-        public IActionResult SetDeviceTime([FromBody] SetTimeRequest request)
+        public async Task<IActionResult> SetDeviceTime([FromBody] SetTimeRequest request)
         {
             try
             {
-                // 1. Połączenie z czytnikiem
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var deviceTime = request.DateTime ?? DateTime.Now;
+                
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    // 2. Blokowanie urządzenia
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    // 3. Ustawianie czasu
-                    DateTime newTime = request.DateTime ?? DateTime.Now;
-                    bool success = _zkemDevice.SetDeviceTime2(request.DeviceNumber, 
-                        newTime.Year, newTime.Month, newTime.Day, 
-                        newTime.Hour, newTime.Minute, newTime.Second);
-
-                    if (!success)
-                    {
-                        return BadRequest(new
-                        {
-                            Success = false,
-                            Message = "Nie udało się ustawić czasu w czytniku"
-                        });
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    // 4. Pobieranie aktualnego czasu dla weryfikacji
-                    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-                    bool timeOk = _zkemDevice.GetDeviceTime(request.DeviceNumber, 
-                        ref year, ref month, ref day, ref hour, ref minute, ref second);
-
-                    var currentTime = timeOk
-                        ? new DateTime(year, month, day, hour, minute, second)
-                        : (DateTime?)null;
-
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Message = "Czas został ustawiony pomyślnie",
-                        SetTime = newTime,
-                        CurrentDeviceTime = currentTime
-                    });
-                }
-                finally
+                        // Blokowanie urządzenia podczas operacji
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        // Ustawianie czasu urządzenia
+                        bool success = device.SetDeviceTime2(request.DeviceNumber, 
+                            deviceTime.Year, deviceTime.Month, deviceTime.Day,
+                            deviceTime.Hour, deviceTime.Minute, deviceTime.Second);
+                        
+                        if (!success)
+                        {
+                            throw new InvalidOperationException("Nie udało się ustawić czasu urządzenia");
+                        }
+
+                        // Pobieramy aktualny czas dla potwierdzenia
+                        int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+                        device.GetDeviceTime(request.DeviceNumber, ref year, ref month, ref day, ref hour, ref minute, ref second);
+                        
+                        return new { 
+                            RequestedTime = deviceTime,
+                            ActualTime = new DateTime(year, month, day, hour, minute, second)
+                        };
+                    }
+                    finally
+                    {
+                        // Odblokowujemy urządzenie przed rozłączeniem
+                        device.EnableDevice(request.DeviceNumber, true);
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    // 5. Odblokowujemy urządzenie przed rozłączeniem
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    // 6. Rozłączamy się z czytnikiem
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Message = "Czas urządzenia został ustawiony pomyślnie",
+                    Data = result
+                });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new
+                return BadRequest(new
                 {
                     Success = false,
                     Message = $"Błąd podczas ustawiania czasu: {ex.Message}"
@@ -137,141 +148,456 @@ namespace ZkemAPI.Web.Controllers
             }
         }
 
-        /// <summary>
-        /// Pobiera informacje o czytniku
-        /// </summary>
         [HttpPost("get-info")]
-        public IActionResult GetDeviceInfo([FromBody] DeviceRequest request)
+        public async Task<IActionResult> GetDeviceInfo([FromBody] DeviceRequest request)
         {
             try
             {
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
+                {
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
+                    {
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
+                    }
+
+                    try
+                    {
+                        var deviceInfo = new
+                        {
+                            FirmwareVersion = GetDeviceStringInfo(device, request.DeviceNumber, d => {
+                                string version = "";
+                                d.GetFirmwareVersion(request.DeviceNumber, ref version);
+                                return version;
+                            }),
+                            SerialNumber = GetDeviceStringInfo(device, request.DeviceNumber, d => {
+                                string serial = "";
+                                d.GetSerialNumber(request.DeviceNumber, ref serial);
+                                return serial;
+                            }),
+                            MAC = GetDeviceStringInfo(device, request.DeviceNumber, d => {
+                                string mac = "";
+                                d.GetDeviceMAC(request.DeviceNumber, ref mac);
+                                return mac;
+                            }),
+                            Platform = GetDeviceStringInfo(device, request.DeviceNumber, d => {
+                                string platform = "";
+                                d.GetPlatform(request.DeviceNumber, ref platform);
+                                return platform;
+                            }),
+                            DeviceTime = GetDeviceTime(device, request.DeviceNumber),
+                            UserCount = GetDeviceIntInfo(device, request.DeviceNumber, 2), // FCR_USER
+                            RecordCount = GetDeviceIntInfo(device, request.DeviceNumber, 8), // FCR_RECORDCOUNT
+                            AdminCount = GetDeviceIntInfo(device, request.DeviceNumber, 4), // FCR_ADMINSTATUS
+                            MaxUsers = GetDeviceIntInfo(device, request.DeviceNumber, 1) // FCR_CAPACITY
+                        };
+
+                        return deviceInfo;
+                    }
+                    finally
+                    {
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
+                {
+                    Success = true,
+                    Message = "Informacje o urządzeniu pobrane pomyślnie",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = $"Błąd podczas pobierania informacji o urządzeniu: {ex.Message}"
+                });
+            }
+        }
+
+        private static string GetDeviceStringInfo(IZkemDevice device, int deviceNumber, Func<IZkemDevice, string> getter)
+        {
+            try
+            {
+                return getter(device) ?? "Niedostępne";
+            }
+            catch
+            {
+                return "Błąd odczytu";
+            }
+        }
+
+        private static int GetDeviceIntInfo(IZkemDevice device, int deviceNumber, int infoType)
+        {
+            try
+            {
+                int value = 0;
+                device.GetDeviceInfo(deviceNumber, infoType, ref value);
+                return value;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static string GetDeviceTime(IZkemDevice device, int deviceNumber)
+        {
+            try
+            {
+                int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+                bool success = device.GetDeviceTime(deviceNumber, ref year, ref month, ref day, ref hour, ref minute, ref second);
+                
+                if (success)
+                {
+                    return new DateTime(year, month, day, hour, minute, second).ToString("yyyy-MM-dd HH:mm:ss");
+                }
+                return "Niedostępny";
+            }
+            catch
+            {
+                return "Błąd odczytu";
+            }
+        }
+
+        [HttpPost("check-connection")]
+        public async Task<IActionResult> CheckConnection([FromBody] DeviceRequest request)
+        {
+            try
+            {
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
+                {
+                    // Próba połączenia z timeout
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
+                    {
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
+                    }
+
+                    try
+                    {
+                        // Test komunikacji - próba pobrania numeru seryjnego
+                        string serialNumber = "";
+                        bool success = device.GetSerialNumber(request.DeviceNumber, ref serialNumber);
+                        
+                        return new { 
+                            Connected = true,
+                            SerialNumber = success ? serialNumber : "Nieznany",
+                            ResponseTime = DateTime.Now
+                        };
+                    }
+                    finally
+                    {
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
+                {
+                    Success = true,
+                    Message = "Połączenie z czytnikiem działa poprawnie",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = $"Brak połączenia z czytnikiem: {ex.Message}",
+                    Data = new { Connected = false }
+                });
+            }
+        }
+
+        [HttpPost("clear-logs")]
+        public async Task<IActionResult> ClearAllLogs([FromBody] DeviceRequest request)
+        {
+            try
+            {
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
+                {
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
+                    {
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
+                    }
+
+                    try
+                    {
+                        // Blokowanie urządzenia podczas operacji
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        // Pobieramy liczę rekordów przed czyszczeniem
+                        int recordsBefore = GetDeviceIntInfo(device, request.DeviceNumber, 8);
+
+                        // Czyszczenie wszystkich logów
+                        bool success = device.ClearGLog(request.DeviceNumber);
+                        
+                        if (!success)
+                        {
+                            throw new InvalidOperationException("Nie udało się wyczyścić logów");
+                        }
+
+                        // Pobieramy liczbę rekordów po czyszczeniu
+                        int recordsAfter = GetDeviceIntInfo(device, request.DeviceNumber, 8);
+
+                        return new { 
+                            RecordsBefore = recordsBefore,
+                            RecordsAfter = recordsAfter,
+                            ClearedRecords = recordsBefore - recordsAfter
+                        };
+                    }
+                    finally
+                    {
+                        // Odblokowujemy urządzenie przed rozłączeniem
+                        device.EnableDevice(request.DeviceNumber, true);
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
+                {
+                    Success = true,
+                    Message = $"Logi zostały wyczyszczone. Usunięto {result.ClearedRecords} rekordów.",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = $"Błąd podczas czyszczenia logów: {ex.Message}"
+                });
+            }
+        }
+
+        [HttpPost("restart")]
+        public async Task<IActionResult> RestartDevice([FromBody] DeviceRequest request)
+        {
+            try
+            {
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
+                {
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
+                    {
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
+                    }
+
+                    try
+                    {
+                        // Restart urządzenia
+                        bool success = device.RestartDevice(request.DeviceNumber);
+                        
+                        if (!success)
+                        {
+                            throw new InvalidOperationException("Nie udało się zrestartować urządzenia");
+                        }
+
+                        return new { RestartTime = DateTime.Now };
+                    }
+                    finally
+                    {
+                        // Nie wywołujemy Disconnect() ponieważ urządzenie jest restartowane
+                        // i połączenie zostanie automatycznie przerwane
+                    }
+                });
+
+                return Ok(new
+                {
+                    Success = true,
+                    Message = "Urządzenie zostało pomyślnie zrestartowane",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = $"Błąd podczas restartu urządzenia: {ex.Message}"
+                });
+            }
+        }
+
+        [HttpPost("beep")]
+        public async Task<IActionResult> PlayBeep([FromBody] BeepRequest request)
+        {
+            try
+            {
+                // Walidacja czasu trwania
+                if (request.Duration < 100 || request.Duration > 3000)
                 {
                     return BadRequest(new
                     {
                         Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
+                        Message = "Czas trwania sygnału musi być między 100 a 3000 milisekund"
                     });
                 }
 
-                try
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    // Podstawowe informacje
-                    string firmwareVer = string.Empty;
-                    string mac = string.Empty;
-                    string platform = string.Empty;
-                    string serialNumber = string.Empty;
-                    string manufacturerCode = string.Empty;
-                    int deviceType = 0;
-
-                    _zkemDevice.GetFirmwareVersion(request.DeviceNumber, ref firmwareVer);
-                    _zkemDevice.GetDeviceMAC(request.DeviceNumber, ref mac);
-                    _zkemDevice.GetPlatform(request.DeviceNumber, ref platform);
-                    _zkemDevice.GetSerialNumber(request.DeviceNumber, ref serialNumber);
-                    _zkemDevice.GetDeviceStrInfo(request.DeviceNumber, 1, out manufacturerCode);
-                    _zkemDevice.GetDeviceInfo(request.DeviceNumber, 1, ref deviceType);
-
-                    // Czas urządzenia
-                    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-                    _zkemDevice.GetDeviceTime(
-                        request.DeviceNumber, 
-                        ref year, ref month, ref day, 
-                        ref hour, ref minute, ref second);
-
-                    // Statystyki
-                    int userCount = 0;
-                    int managerCount = 0;
-                    int fingerCount = 0;
-                    int recordCount = 0;
-                    int pwdCount = 0;
-                    int oplogCount = 0;
-                    int faceCount = 0;
-
-                    // Pobieramy listę wszystkich użytkowników i liczymy ich ręcznie
-                    bool success = _zkemDevice.ReadAllUserID(request.DeviceNumber);
-                    if (success)
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        string enrollNumber = string.Empty;
-                        while (_zkemDevice.SSR_GetAllUserInfo(
-                            request.DeviceNumber,
-                            out enrollNumber,
-                            out string name,
-                            out string password,
-                            out int privilege,
-                            out bool enabled))
-                        {
-                            if (privilege > 0)
-                            {
-                                managerCount++;
-                            }
-                            else
-                            {
-                                userCount++;
-                            }
-                        }
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    // Pozostałe statystyki
-                    _zkemDevice.GetDeviceStatus(request.DeviceNumber, 3, ref fingerCount);    // Liczba odcisków palców
-                    _zkemDevice.GetDeviceStatus(request.DeviceNumber, 4, ref pwdCount);       // Liczba haseł
-                    _zkemDevice.GetDeviceStatus(request.DeviceNumber, 5, ref recordCount);    // Liczba logów
-                    _zkemDevice.GetDeviceStatus(request.DeviceNumber, 6, ref oplogCount);     // Liczba logów operacji
-                    _zkemDevice.GetDeviceStatus(request.DeviceNumber, 21, ref faceCount);     // Liczba twarzy
-
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Data = new
+                        // Blokowanie urządzenia
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        // Odtwarzanie sygnału dźwiękowego
+                        bool success = device.Beep(request.Duration);
+                        
+                        if (!success)
                         {
-                            // Informacje podstawowe
-                            FirmwareVersion = firmwareVer,
-                            MacAddress = mac,
-                            Platform = platform,
-                            SerialNumber = serialNumber,
-                            ManufacturerCode = manufacturerCode,
-                            DeviceType = deviceType,
-
-                            // Czas urządzenia
-                            DeviceTime = new DateTime(year, month, day, hour, minute, second),
-
-                            // Statystyki
-                            Statistics = new
-                            {
-                                UserCount = userCount,
-                                ManagerCount = managerCount,
-                                FingerCount = fingerCount,
-                                PasswordCount = pwdCount,
-                                RecordCount = recordCount,
-                                OperationLogCount = oplogCount,
-                                FaceCount = faceCount
-                            }
+                            throw new InvalidOperationException("Nie udało się odtworzyć sygnału dźwiękowego");
                         }
-                    });
-                }
-                finally
+
+                        return new { Duration = request.Duration };
+                    }
+                    finally
+                    {
+                        // Odblokowujemy urządzenie przed rozłączeniem
+                        device.EnableDevice(request.DeviceNumber, true);
+                        // Rozłączamy się z czytnikiem
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Message = $"Sygnał dźwiękowy odtworzony przez {result.Duration}ms"
+                });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new
+                return BadRequest(new
                 {
                     Success = false,
-                    Message = $"Błąd podczas pobierania informacji o czytniku: {ex.Message}"
+                    Message = $"Błąd podczas odtwarzania sygnału: {ex.Message}"
                 });
             }
         }
+
+        [HttpPost("play-voice")]
+        public async Task<IActionResult> PlayVoice([FromBody] VoiceRequest request)
+        {
+            try
+            {
+                // Walidacja parametrów
+                if (request.VoiceIndex < 0 || request.VoiceIndex > 9)
+                {
+                    return BadRequest(new
+                    {
+                        Success = false,
+                        Message = "Indeks komunikatu głosowego musi być między 0 a 9"
+                    });
+                }
+
+                if (request.Length < 100 || request.Length > 5000)
+                {
+                    return BadRequest(new
+                    {
+                        Success = false,
+                        Message = "Długość komunikatu musi być między 100 a 5000 milisekund"
+                    });
+                }
+
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
+                {
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
+                    {
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
+                    }
+
+                    try
+                    {
+                        // Blokowanie urządzenia
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        // Odtwarzanie komunikatu głosowego
+                        bool success = device.PlayVoice(request.VoiceIndex, request.Length);
+                        
+                        if (!success)
+                        {
+                            throw new InvalidOperationException("Nie udało się odtworzyć komunikatu głosowego");
+                        }
+
+                        return new { VoiceIndex = request.VoiceIndex, Length = request.Length };
+                    }
+                    finally
+                    {
+                        // Odblokowujemy urządzenie przed rozłączeniem
+                        device.EnableDevice(request.DeviceNumber, true);
+                        // Rozłączamy się z czytnikiem
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
+                {
+                    Success = true,
+                    Message = $"Komunikat głosowy {result.VoiceIndex} odtworzony przez {result.Length}ms"
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = $"Błąd podczas odtwarzania komunikatu głosowego: {ex.Message}"
+                });
+            }
+        }
+    
     }
 
     public class SetTimeRequest
     {
-        public string IpAddress { get; set; }
-        public int Port { get; set; }
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
         public int DeviceNumber { get; set; } = 1;
-        public DateTime? DateTime { get; set; }  // Jeśli null, zostanie użyty aktualny czas
+        public DateTime? DateTime { get; set; }
+    }
+
+    public class DeviceRequest
+    {
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
+        public int DeviceNumber { get; set; } = 1;
+    }
+
+    public class BeepRequest
+    {
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
+        public int DeviceNumber { get; set; } = 1;
+        /// <summary>
+        /// Czas trwania sygnału w milisekundach (100-3000ms)
+        /// </summary>
+        public int Duration { get; set; } = 500;
+    }
+
+    public class VoiceRequest
+    {
+        public required string IpAddress { get; set; }
+        public required int Port { get; set; }
+        public int DeviceNumber { get; set; } = 1;
+        /// <summary>
+        /// Indeks komunikatu głosowego (0-9 dla standardowych komunikatów)
+        /// </summary>
+        public int VoiceIndex { get; set; } = 0;
+        /// <summary>
+        /// Długość odtwarzania komunikatu w milisekundach (100-5000ms)
+        /// </summary>
+        public int Length { get; set; } = 1000;
     }
 } 

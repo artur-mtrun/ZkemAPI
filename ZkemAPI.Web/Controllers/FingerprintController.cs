@@ -3,6 +3,8 @@ using ZkemAPI.Core.Interfaces;
 using ZkemAPI.Core.Models;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace ZkemAPI.Web.Controllers
 {
@@ -10,68 +12,65 @@ namespace ZkemAPI.Web.Controllers
     [Route("api/[controller]")]
     public class FingerprintController : ControllerBase
     {
-        private readonly IZkemDevice _zkemDevice;
+        private readonly IDeviceConnectionManager _deviceManager;
 
-        public FingerprintController(IZkemDevice zkemDevice)
+        public FingerprintController(IDeviceConnectionManager deviceManager)
         {
-            _zkemDevice = zkemDevice;
+            _deviceManager = deviceManager;
         }
 
         /// <summary>
         /// Pobiera odciski palców użytkownika
         /// </summary>
         [HttpPost("get")]
-        public IActionResult GetFingerprints([FromBody] FingerprintRequest request)
+        public async Task<IActionResult> GetFingerprints([FromBody] FingerprintRequest request)
         {
             try
             {
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    var fingerprints = new List<FingerprintData>();
-                    _zkemDevice.ReadAllTemplate(request.DeviceNumber);
-
-                    for (int i = 0; i < 10; i++) // 10 palców
-                    {
-                        if (_zkemDevice.GetUserTmpExStr(
-                            request.DeviceNumber, 
-                            request.EnrollNumber, 
-                            i, 
-                            out int flag,
-                            out string tmpData, 
-                            out int tmpLength))
-                        {
-                            fingerprints.Add(new FingerprintData
-                            {
-                                FingerIndex = i,
-                                Flag = flag,
-                                TemplateData = tmpData,
-                                TemplateLength = tmpLength
-                            });
-                        }
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Data = fingerprints
-                    });
-                }
-                finally
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        var fingerprints = new List<FingerprintData>();
+                        device.ReadAllTemplate(request.DeviceNumber);
+
+                        // Sprawdzamy każdy możliwy palec (0-9)
+                        for (int fingerIndex = 0; fingerIndex < 10; fingerIndex++)
+                        {
+                            if (device.GetUserTmpExStr(request.DeviceNumber, request.EnrollNumber, fingerIndex, 
+                                out int flag, out string tmpData, out int tmpLength))
+                            {
+                                fingerprints.Add(new FingerprintData
+                                {
+                                    FingerIndex = fingerIndex,
+                                    Flag = flag,
+                                    TemplateData = tmpData,
+                                    TemplateLength = tmpLength
+                                });
+                            }
+                        }
+
+                        return fingerprints;
+                    }
+                    finally
+                    {
+                        device.EnableDevice(request.DeviceNumber, true);
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Data = result
+                });
             }
             catch (Exception ex)
             {
@@ -87,51 +86,46 @@ namespace ZkemAPI.Web.Controllers
         /// Wysyła odciski palców użytkownika
         /// </summary>
         [HttpPost("set")]
-        public IActionResult SetFingerprints([FromBody] FingerprintSetRequest request)
+        public async Task<IActionResult> SetFingerprints([FromBody] FingerprintSetRequest request)
         {
             try
             {
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    foreach (var fingerprint in request.Fingerprints)
-                    {
-                        if (!_zkemDevice.SetUserTmpExStr(
-                            request.DeviceNumber, 
-                            request.EnrollNumber, 
-                            fingerprint.FingerIndex,
-                            fingerprint.Flag,
-                            fingerprint.TemplateData))
-                        {
-                            return BadRequest(new
-                            {
-                                Success = false,
-                                Message = $"Nie udało się zapisać odcisku palca dla palca {fingerprint.FingerIndex}"
-                            });
-                        }
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Message = "Odciski palców zostały zapisane pomyślnie"
-                    });
-                }
-                finally
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        foreach (var fingerprint in request.Fingerprints)
+                        {
+                            if (!device.SetUserTmpExStr(
+                                request.DeviceNumber, 
+                                request.EnrollNumber, 
+                                fingerprint.FingerIndex,
+                                fingerprint.Flag,
+                                fingerprint.TemplateData))
+                            {
+                                throw new InvalidOperationException($"Nie udało się zapisać odcisku palca dla palca {fingerprint.FingerIndex}");
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        device.EnableDevice(request.DeviceNumber, true);
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Message = "Odciski palców zostały zapisane pomyślnie"
+                });
             }
             catch (Exception ex)
             {
@@ -147,62 +141,72 @@ namespace ZkemAPI.Web.Controllers
         /// Wysyła odciski palców dla wielu użytkowników
         /// </summary>
         [HttpPost("bulk-set")]
-        public IActionResult SetBulkFingerprints([FromBody] FingerprintBulkSetRequest request)
+        public async Task<IActionResult> SetBulkFingerprints([FromBody] FingerprintBulkSetRequest request)
         {
             try
             {
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    var results = new List<BulkOperationResult>();
-
-                    foreach (var userFingerprints in request.UsersFingerprints)
-                    {
-                        var userResult = new BulkOperationResult
-                        {
-                            EnrollNumber = userFingerprints.EnrollNumber,
-                            Success = true,
-                            Errors = new List<string>()
-                        };
-
-                        foreach (var fingerprint in userFingerprints.Fingerprints)
-                        {
-                            if (!_zkemDevice.SetUserTmpExStr(
-                                request.DeviceNumber,
-                                userFingerprints.EnrollNumber,
-                                fingerprint.FingerIndex,
-                                fingerprint.Flag,
-                                fingerprint.TemplateData))
-                            {
-                                userResult.Success = false;
-                                userResult.Errors.Add($"Nie udało się zapisać odcisku palca {fingerprint.FingerIndex}");
-                            }
-                        }
-
-                        results.Add(userResult);
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Data = results
-                    });
-                }
-                finally
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        var results = new List<BulkOperationResult>();
+
+                        foreach (var userFingerprints in request.UsersFingerprints)
+                        {
+                            var userResult = new BulkOperationResult
+                            {
+                                EnrollNumber = userFingerprints.EnrollNumber,
+                                Success = true,
+                                Errors = new List<string>()
+                            };
+
+                            try
+                            {
+                                foreach (var fingerprint in userFingerprints.Fingerprints)
+                                {
+                                    if (!device.SetUserTmpExStr(
+                                        request.DeviceNumber,
+                                        userFingerprints.EnrollNumber,
+                                        fingerprint.FingerIndex,
+                                        fingerprint.Flag,
+                                        fingerprint.TemplateData))
+                                    {
+                                        userResult.Success = false;
+                                        userResult.Errors.Add($"Nie udało się zapisać odcisku palca {fingerprint.FingerIndex}");
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                userResult.Success = false;
+                                userResult.Errors.Add($"Błąd dla użytkownika {userFingerprints.EnrollNumber}: {ex.Message}");
+                            }
+
+                            results.Add(userResult);
+                        }
+
+                        return results;
+                    }
+                    finally
+                    {
+                        device.EnableDevice(request.DeviceNumber, true);
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Message = "Operacja masowego wysyłania odcisków palców zakończona",
+                    Data = result
+                });
             }
             catch (Exception ex)
             {

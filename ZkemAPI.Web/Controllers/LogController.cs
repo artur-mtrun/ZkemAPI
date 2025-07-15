@@ -3,6 +3,8 @@ using ZkemAPI.Core.Interfaces;
 using ZkemAPI.Core.Models;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace ZkemAPI.Web.Controllers
 {
@@ -10,106 +12,82 @@ namespace ZkemAPI.Web.Controllers
     [Route("api/[controller]")]
     public class LogController : ControllerBase
     {
-        private readonly IZkemDevice _zkemDevice;
+        private readonly IDeviceConnectionManager _deviceManager;
 
-        public LogController(IZkemDevice zkemDevice)
+        public LogController(IDeviceConnectionManager deviceManager)
         {
-            _zkemDevice = zkemDevice;
+            _deviceManager = deviceManager;
         }
 
         /// <summary>
         /// Pobiera logi operacji administracyjnych
         /// </summary>
         [HttpPost("operations")]
-        public IActionResult GetOperationLogs([FromBody] LogRequest request)
+        public async Task<IActionResult> GetOperationLogs([FromBody] LogRequest request)
         {
             try
             {
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    var logs = new List<OperationLog>();
-
-                    int index = 0;
-                    int adminId = 0;
-                    int operation = 0;
-                    int param1 = 0, param2 = 0, param3 = 0;
-                    int year = 0, month = 0, day = 0;
-                    int hour = 0, minute = 0, second = 0;
-
-                    while (_zkemDevice.GetSuperLogData(
-                        request.DeviceNumber,
-                        ref index,
-                        ref adminId,
-                        ref operation,
-                        ref param1,
-                        ref param2,
-                        ref param3,
-                        ref year,
-                        ref month,
-                        ref day,
-                        ref hour,
-                        ref minute,
-                        ref second))
-                    {
-                        try
-                        {
-                            // Walidacja i korekta daty
-                            year = year < 2000 ? 2000 + year : year;  // Jeśli rok jest dwucyfrowy
-                            month = Math.Max(1, Math.Min(12, month)); // Miesiąc między 1 a 12
-                            day = Math.Max(1, Math.Min(31, day));     // Dzień między 1 a 31
-                            hour = Math.Max(0, Math.Min(23, hour));   // Godzina między 0 a 23
-                            minute = Math.Max(0, Math.Min(59, minute)); // Minuta między 0 a 59
-                            second = Math.Max(0, Math.Min(59, second)); // Sekunda między 0 a 59
-
-                            var dateTime = new DateTime(year, month, day, hour, minute, second);
-
-                            logs.Add(new OperationLog
-                            {
-                                Index = index,
-                                AdminId = adminId,
-                                Operation = operation,
-                                DateTime = dateTime,
-                                WorkCode = $"{param1},{param2},{param3}",
-                                OperationName = GetOperationName(operation)
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            // Jeśli data nadal jest nieprawidłowa, używamy aktualnej daty
-                            logs.Add(new OperationLog
-                            {
-                                Index = index,
-                                AdminId = adminId,
-                                Operation = operation,
-                                DateTime = DateTime.Now,
-                                WorkCode = $"{param1},{param2},{param3} (Błędna data: {year}-{month}-{day} {hour}:{minute}:{second})",
-                                OperationName = GetOperationName(operation)
-                            });
-                        }
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Data = logs
-                    });
-                }
-                finally
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        var logs = new List<OperationLog>();
+
+                        int index = 0;
+                        int adminId = 0;
+                        int operation = 0;
+                        int param1 = 0, param2 = 0, param3 = 0;
+                        int year = 0, month = 0, day = 0;
+                        int hour = 0, minute = 0, second = 0;
+
+                        // Pobieranie logów operacji jeden po drugim
+                        while (device.GetSuperLogData(
+                            request.DeviceNumber,
+                            ref index,
+                            ref adminId,
+                            ref operation,
+                            ref param1,
+                            ref param2,
+                            ref param3,
+                            ref year,
+                            ref month,
+                            ref day,
+                            ref hour,
+                            ref minute,
+                            ref second))
+                        {
+                            logs.Add(new OperationLog
+                            {
+                                Index = index,
+                                AdminId = adminId,
+                                Operation = operation,
+                                OperationName = GetOperationName(operation),
+                                WorkCode = $"{param1},{param2},{param3}",
+                                DateTime = new DateTime(year, month, day, hour, minute, second)
+                            });
+                        }
+
+                        return logs.OrderByDescending(x => x.DateTime);
+                    }
+                    finally
+                    {
+                        device.EnableDevice(request.DeviceNumber, true);
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Data = result
+                });
             }
             catch (Exception ex)
             {

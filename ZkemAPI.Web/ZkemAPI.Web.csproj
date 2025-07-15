@@ -12,6 +12,8 @@
     <ProjectReference Include="..\ZkemAPI.Core\ZkemAPI.Core.csproj" />
     <ProjectReference Include="..\ZkemAPI.SDK\ZkemAPI.SDK.csproj" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.4" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,6 +24,12 @@
 
   <ItemGroup>
     <None Update="allowedIps.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="nlog.config">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

@@ -21,6 +21,7 @@ namespace ZkemAPI.Core.Interfaces
         bool GetUserInfo(int dwMachineNumber, int dwEnrollNumber, ref string name, ref string password, ref int privilege, ref bool enabled);
         bool SetUserInfo(int dwMachineNumber, int dwEnrollNumber, string name, string password, int privilege, bool enabled);
         bool DeleteUserInfoEx(int dwMachineNumber, int dwEnrollNumber);
+        bool GetUserInfoEx(int dwMachineNumber, int dwEnrollNumber, out int dwVerifyMode, out byte Reserved);
         
         // Zarządzanie użytkownikami - nowe API (SSR)
         bool SSR_GetUserInfo(int dwMachineNumber, string enrollNumber, out string name, 
@@ -48,9 +49,6 @@ namespace ZkemAPI.Core.Interfaces
         // Operacje na urządzeniu
         bool EnableDevice(int dwMachineNumber, bool enabled);
         bool RestartDevice(int dwMachineNumber);
-
-        Task<(bool success, string name, string password, int privilege, bool enabled, string cardNumber)> 
-            GetUserInfoWithCard(int dwMachineNumber, string enrollNumber);
 
         /// <summary>
         /// Pobiera informacje o wszystkich użytkownikach
@@ -97,5 +95,11 @@ namespace ZkemAPI.Core.Interfaces
         bool ReadAllTemplate(int dwMachineNumber);
         bool GetUserTmpExStr(int dwMachineNumber, string dwEnrollNumber, int dwFingerIndex, out int flag, out string tmpData, out int tmpLength);
         bool SetUserTmpExStr(int dwMachineNumber, string dwEnrollNumber, int dwFingerIndex, int flag, string tmpData);
+
+        bool ClearData(int dwMachineNumber, int dwValue);
+
+        // Sygnały dźwiękowe
+        bool Beep(int delay);
+        bool PlayVoice(int voiceIndex, int length);
     }
 } 

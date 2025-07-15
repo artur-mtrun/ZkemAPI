@@ -6,8 +6,72 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.Extensions.Options;
+using NLog;
+using NLog.Web;
+using ZkemAPI.Web.Middleware;
 
-var builder = WebApplication.CreateBuilder(args);
+// Debug NLog
+Console.WriteLine("=== DEBUG NLOG ===");
+Console.WriteLine($"Current Directory: {Directory.GetCurrentDirectory()}");
+Console.WriteLine($"Base Directory: {AppDomain.CurrentDomain.BaseDirectory}");
+Console.WriteLine($"nlog.config exists: {File.Exists("nlog.config")}");
+Console.WriteLine($"nlog.config full path: {Path.GetFullPath("nlog.config")}");
+
+// Lista wszystkich plików w katalogu
+Console.WriteLine("Files in current directory:");
+foreach (var file in Directory.GetFiles(Directory.GetCurrentDirectory(), "*.*"))
+{
+    Console.WriteLine($"  {file}");
+}
+
+if (File.Exists("nlog.config"))
+{
+    Console.WriteLine($"nlog.config content: {File.ReadAllText("nlog.config").Substring(0, 200)}...");
+}
+
+// Early init of NLog to allow startup and exception logging, before host is built
+// Konfiguracja NLog bezpośrednio w kodzie
+var config = new NLog.Config.LoggingConfiguration();
+
+// File target
+var fileTarget = new NLog.Targets.FileTarget("logfile")
+{
+    FileName = @"C:\temp\zkemapi-${shortdate}.log",
+    Layout = "${longdate} ${level:uppercase=true} ${logger} ${message} ${exception:format=tostring}"
+};
+
+var errorTarget = new NLog.Targets.FileTarget("errorfile")
+{
+    FileName = @"C:\temp\zkemapi-errors-${shortdate}.log",
+    Layout = "${longdate} ${level:uppercase=true} ${logger} ${message} ${exception:format=tostring} ${stacktrace}"
+};
+
+var consoleTarget = new NLog.Targets.ConsoleTarget("console")
+{
+    Layout = "${time} [${level}] ${message} ${exception:format=tostring}"
+};
+
+// Rules
+config.AddRule(NLog.LogLevel.Debug, NLog.LogLevel.Fatal, fileTarget);
+config.AddRule(NLog.LogLevel.Error, NLog.LogLevel.Fatal, errorTarget);
+config.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, consoleTarget);
+
+LogManager.Configuration = config;
+var logger = LogManager.GetCurrentClassLogger();
+logger.Debug("Inicjalizacja aplikacji...");
+logger.Info("TEST LOGOWANIA - to powinno się pojawić w pliku!");
+logger.Error("TEST BŁĘDU - to powinno się pojawić w pliku błędów!");
+Console.WriteLine("Logger initialized");
+Console.WriteLine("Test logs written - check for files now!");
+
+try
+{
+    var builder = WebApplication.CreateBuilder(args);
+
+    // NLog: Setup NLog for Dependency injection
+    builder.Logging.ClearProviders();
+    builder.Host.UseNLog();
 
 // Wczytaj dozwolone hosty z pliku
 var allowedHostsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "allowedHosts.json");
@@ -53,12 +117,32 @@ builder.Services.AddSwaggerGen(c =>
 // Dodaj własne middleware do sprawdzania hostów
 builder.Services.AddTransient<IStartupFilter, CustomHostFilteringStartupFilter>();
 
-builder.Services.AddSingleton<IZkemDevice, ZkemDevice>();
+// Rejestracja konfiguracji DeviceSettings
+builder.Services.Configure<ZkemAPI.SDK.Models.DeviceSettings>(
+    builder.Configuration.GetSection("DeviceSettings"));
 
-var app = builder.Build();
+// Rejestracja serwisów do obsługi czytników
+builder.Services.AddTransient<IZkemDevice>(provider => 
+{
+    var logger = provider.GetRequiredService<ILogger<ZkemDevice>>();
+    return new ZkemDevice(logger);
+});
 
-// Dodaj middleware do filtrowania IP przed innymi middleware
-app.UseMiddleware<ClientIpFilterMiddleware>();
+builder.Services.AddSingleton<IDeviceConnectionManager>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<DeviceConnectionManager>>();
+    var deviceFactory = new Func<IZkemDevice>(() => provider.GetRequiredService<IZkemDevice>());
+    var deviceSettings = provider.GetRequiredService<IOptions<ZkemAPI.SDK.Models.DeviceSettings>>();
+    return new DeviceConnectionManager(logger, deviceFactory, deviceSettings);
+});
+
+    var app = builder.Build();
+
+    // Dodaj middleware do globalnego łapania wyjątków (na początku pipeline)
+    app.UseMiddleware<GlobalExceptionMiddleware>();
+
+    // Dodaj middleware do filtrowania IP przed innymi middleware
+    app.UseMiddleware<ClientIpFilterMiddleware>();
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -72,7 +156,20 @@ app.MapGet("/", () => Results.Redirect("/swagger"));
 app.UseAuthorization();
 app.MapControllers();
 
-app.Run();
+    logger.Debug("Uruchamianie aplikacji...");
+    app.Run();
+}
+catch (Exception exception)
+{
+    // NLog: catch setup errors
+    logger.Error(exception, "Zatrzymano aplikację z powodu wyjątku");
+    throw;
+}
+finally
+{
+    // Ensure to flush and stop internal timers/threads before application-exit (Avoid segmentation fault on Linux)
+    LogManager.Shutdown();
+}
 
 // Klasy pomocnicze
 public class AllowedHostsConfig

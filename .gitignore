@@ -364,3 +364,7 @@ FodyWeavers.xsd
 /ZkemAPI.Web/allowedIps.json
 /ZkemAPI.Web/allowedHosts.json
 /ZkemAPI.Web/appsettings.json
+
+# Log files
+logs/
+*.log

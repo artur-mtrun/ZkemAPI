@@ -8,11 +8,11 @@ namespace ZkemAPI.Web.Controllers
     [Route("api/[controller]")]
     public class AttendanceController : ControllerBase
     {
-        private readonly IZkemDevice _zkemDevice;
+        private readonly IDeviceConnectionManager _deviceManager;
 
-        public AttendanceController(IZkemDevice zkemDevice)
+        public AttendanceController(IDeviceConnectionManager deviceManager)
         {
-            _zkemDevice = zkemDevice;
+            _deviceManager = deviceManager;
         }
 
         /// <summary>
@@ -21,74 +21,71 @@ namespace ZkemAPI.Web.Controllers
         /// <param name="request">Parametry połączenia</param>
         /// <returns>Lista logów obecności</returns>
         [HttpPost("get-logs")]
-        public IActionResult GetAttendanceLogs([FromBody] AttendanceRequest request)
+        public async Task<IActionResult> GetAttendanceLogs([FromBody] AttendanceRequest request)
         {
             try
             {
-                // 1. Połączenie z czytnikiem
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    // 2. Blokowanie urządzenia
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    var logs = new List<AttendanceLog>();
-
-                    // 3. Pobieranie danych
-                    if (!_zkemDevice.ReadGeneralLogData(request.DeviceNumber))
-                    {
-                        return BadRequest(new
-                        {
-                            Success = false,
-                            Message = "Nie udało się odczytać logów z urządzenia"
-                        });
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    // 4. Pobieranie logów jeden po drugim
-                    while (_zkemDevice.SSR_GetGeneralLogData(
-                        request.DeviceNumber,
-                        out string enrollNumber,
-                        out int verifyMode,
-                        out int inOutMode,
-                        out int year,
-                        out int month,
-                        out int day,
-                        out int hour,
-                        out int minute,
-                        out int second,
-                        out int workCode))
+                    try
                     {
-                        logs.Add(new AttendanceLog
-                        {
-                            UserId = enrollNumber,
-                            LogTime = new DateTime(year, month, day, hour, minute, second),
-                            VerifyMode = (VerifyMode)verifyMode,
-                            InOutMode = (InOutMode)inOutMode,
-                            WorkCode = workCode
-                        });
-                    }
+                        // Blokowanie urządzenia
+                        device.EnableDevice(request.DeviceNumber, false);
 
-                    return Ok(new
+                        var logs = new List<AttendanceLog>();
+
+                        // Pobieranie danych
+                        if (!device.ReadGeneralLogData(request.DeviceNumber))
+                        {
+                            throw new InvalidOperationException("Nie udało się odczytać logów z urządzenia");
+                        }
+
+                        // Pobieranie logów jeden po drugim
+                        while (device.SSR_GetGeneralLogData(
+                            request.DeviceNumber,
+                            out string enrollNumber,
+                            out int verifyMode,
+                            out int inOutMode,
+                            out int year,
+                            out int month,
+                            out int day,
+                            out int hour,
+                            out int minute,
+                            out int second,
+                            out int workCode))
+                        {
+                            logs.Add(new AttendanceLog
+                            {
+                                UserId = enrollNumber,
+                                LogTime = new DateTime(year, month, day, hour, minute, second),
+                                VerifyMode = (VerifyMode)verifyMode,
+                                InOutMode = (InOutMode)inOutMode,
+                                WorkCode = workCode
+                            });
+                        }
+
+                        return logs.OrderByDescending(x => x.LogTime);
+                    }
+                    finally
                     {
-                        Success = true,
-                        Data = logs.OrderByDescending(x => x.LogTime)
-                    });
-                }
-                finally
+                        // Odblokowujemy urządzenie przed rozłączeniem
+                        device.EnableDevice(request.DeviceNumber, true);
+                        // Rozłączamy się z czytnikiem
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    // 5. Odblokowujemy urządzenie przed rozłączeniem
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    // 6. Rozłączamy się z czytnikiem
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Data = result
+                });
             }
             catch (Exception ex)
             {
@@ -106,64 +103,65 @@ namespace ZkemAPI.Web.Controllers
         /// <param name="request">Parametry połączenia</param>
         /// <returns>Lista wszystkich logów obecności</returns>
         [HttpPost("get-all-logs")]
-        public IActionResult GetAllAttendanceLogs([FromBody] AttendanceRequest request)
+        public async Task<IActionResult> GetAllAttendanceLogs([FromBody] AttendanceRequest request)
         {
             try
             {
-                // 1. Połączenie z czytnikiem
-                if (!_zkemDevice.Connect_Net(request.IpAddress, request.Port))
+                var result = await _deviceManager.ExecuteDeviceOperationAsync(request.IpAddress, request.Port, device =>
                 {
-                    return BadRequest(new
+                    // Połączenie z czytnikiem
+                    if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
-                        Success = false,
-                        Message = "Nie udało się połączyć z czytnikiem"
-                    });
-                }
-
-                try
-                {
-                    // 2. Blokowanie urządzenia
-                    _zkemDevice.EnableDevice(request.DeviceNumber, false);
-
-                    var logs = new List<AttendanceLog>();
-
-                    // 3. Pobieranie logów jeden po drugim
-                    while (_zkemDevice.SSR_GetGeneralLogData(
-                        request.DeviceNumber,
-                        out string enrollNumber,
-                        out int verifyMode,
-                        out int inOutMode,
-                        out int year,
-                        out int month,
-                        out int day,
-                        out int hour,
-                        out int minute,
-                        out int second,
-                        out int workCode))
-                    {
-                        logs.Add(new AttendanceLog
-                        {
-                            UserId = enrollNumber,
-                            LogTime = new DateTime(year, month, day, hour, minute, second),
-                            VerifyMode = (VerifyMode)verifyMode,
-                            InOutMode = (InOutMode)inOutMode,
-                            WorkCode = workCode
-                        });
+                        throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
                     }
 
-                    return Ok(new
+                    try
                     {
-                        Success = true,
-                        Data = logs.OrderByDescending(x => x.LogTime)
-                    });
-                }
-                finally
+                        // Blokowanie urządzenia
+                        device.EnableDevice(request.DeviceNumber, false);
+
+                        var logs = new List<AttendanceLog>();
+
+                        // Pobieranie logów jeden po drugim
+                        while (device.SSR_GetGeneralLogData(
+                            request.DeviceNumber,
+                            out string enrollNumber,
+                            out int verifyMode,
+                            out int inOutMode,
+                            out int year,
+                            out int month,
+                            out int day,
+                            out int hour,
+                            out int minute,
+                            out int second,
+                            out int workCode))
+                        {
+                            logs.Add(new AttendanceLog
+                            {
+                                UserId = enrollNumber,
+                                LogTime = new DateTime(year, month, day, hour, minute, second),
+                                VerifyMode = (VerifyMode)verifyMode,
+                                InOutMode = (InOutMode)inOutMode,
+                                WorkCode = workCode
+                            });
+                        }
+
+                        return logs.OrderByDescending(x => x.LogTime);
+                    }
+                    finally
+                    {
+                        // Odblokowujemy urządzenie przed rozłączeniem
+                        device.EnableDevice(request.DeviceNumber, true);
+                        // Rozłączamy się z czytnikiem
+                        device.Disconnect();
+                    }
+                });
+
+                return Ok(new
                 {
-                    // 4. Odblokowujemy urządzenie przed rozłączeniem
-                    _zkemDevice.EnableDevice(request.DeviceNumber, true);
-                    // 5. Rozłączamy się z czytnikiem
-                    _zkemDevice.Disconnect();
-                }
+                    Success = true,
+                    Data = result
+                });
             }
             catch (Exception ex)
             {
