@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using ZkemAPI.Core.Models;
 
 namespace ZkemAPI.Core.Interfaces
 {
@@ -54,6 +55,8 @@ namespace ZkemAPI.Core.Interfaces
         /// <param name="port">Port czytnika</param>
         /// <returns>Liczba oczekujących operacji</returns>
         int GetPendingOperationsCount(string ipAddress, int port);
+
+
 
         /// <summary>
         /// Zwalnia zasoby dla określonego czytnika

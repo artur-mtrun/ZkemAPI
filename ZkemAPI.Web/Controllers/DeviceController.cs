@@ -35,9 +35,9 @@ namespace ZkemAPI.Web.Controllers
                     {
                         // Test podstawowego połączenia - sprawdzamy wersję firmware
                         string version = "";
-                        bool success = device.GetFirmwareVersion(1, ref version);
+                        bool deviceSuccess = device.GetFirmwareVersion(1, ref version);
                         
-                        if (!success)
+                        if (!deviceSuccess)
                         {
                             throw new InvalidOperationException("Połączenie nawiązane, ale nie można pobrać informacji z urządzenia");
                         }
@@ -54,7 +54,27 @@ namespace ZkemAPI.Web.Controllers
                 {
                     Success = true,
                     Message = $"Połączenie z czytnikiem {ip}:{port} nawiązane pomyślnie",
-                    Data = result
+                    Data = result,
+                    DeviceStatus = "Online"
+                });
+            }
+            catch (DeviceBusyException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString(),
+                    EstimatedWaitTime = ex.Status.EstimatedWaitTimeSeconds
+                });
+            }
+            catch (DeviceOfflineException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString()
                 });
             }
             catch (Exception ex)
@@ -62,7 +82,8 @@ namespace ZkemAPI.Web.Controllers
                 return BadRequest(new
                 {
                     Success = false,
-                    Message = $"Błąd połączenia z czytnikiem {ip}:{port}: {ex.Message}"
+                    Message = $"Błąd połączenia z czytnikiem {ip}:{port}: {ex.Message}",
+                    DeviceStatus = "Unknown"
                 });
             }
         }
@@ -97,10 +118,10 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         // Blokowanie urządzenia podczas operacji
                         device.EnableDevice(request.DeviceNumber, false);
 
@@ -108,16 +129,16 @@ namespace ZkemAPI.Web.Controllers
                         bool success = device.SetDeviceTime2(request.DeviceNumber, 
                             deviceTime.Year, deviceTime.Month, deviceTime.Day,
                             deviceTime.Hour, deviceTime.Minute, deviceTime.Second);
-                        
-                        if (!success)
-                        {
+
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się ustawić czasu urządzenia");
-                        }
+                    }
 
                         // Pobieramy aktualny czas dla potwierdzenia
-                        int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+                    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
                         device.GetDeviceTime(request.DeviceNumber, ref year, ref month, ref day, ref hour, ref minute, ref second);
-                        
+
                         return new { 
                             RequestedTime = deviceTime,
                             ActualTime = new DateTime(year, month, day, hour, minute, second)
@@ -131,9 +152,9 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                    return Ok(new
+                    {
+                        Success = true,
                     Message = "Czas urządzenia został ustawiony pomyślnie",
                     Data = result
                 });
@@ -159,10 +180,10 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         var deviceInfo = new
                         {
                             FirmwareVersion = GetDeviceStringInfo(device, request.DeviceNumber, d => {
@@ -200,9 +221,9 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                    return Ok(new
+                    {
+                        Success = true,
                     Message = "Informacje o urządzeniu pobrane pomyślnie",
                     Data = result
                 });
@@ -210,7 +231,7 @@ namespace ZkemAPI.Web.Controllers
             catch (Exception ex)
             {
                 return BadRequest(new
-                {
+                        {
                     Success = false,
                     Message = $"Błąd podczas pobierania informacji o urządzeniu: {ex.Message}"
                 });
@@ -286,11 +307,11 @@ namespace ZkemAPI.Web.Controllers
                             SerialNumber = success ? serialNumber : "Nieznany",
                             ResponseTime = DateTime.Now
                         };
-                    }
-                    finally
-                    {
+                }
+                finally
+                {
                         device.Disconnect();
-                    }
+                }
                 });
 
                 return Ok(new
@@ -310,7 +331,7 @@ namespace ZkemAPI.Web.Controllers
                 });
             }
         }
-
+  
         [HttpPost("clear-logs")]
         public async Task<IActionResult> ClearAllLogs([FromBody] DeviceRequest request)
         {
@@ -357,18 +378,18 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                        return Ok(new
+                        {
+                            Success = true,
                     Message = $"Logi zostały wyczyszczone. Usunięto {result.ClearedRecords} rekordów.",
                     Data = result
-                });
-            }
+                        });
+                    }
             catch (Exception ex)
-            {
-                return BadRequest(new
-                {
-                    Success = false,
+                    {
+                        return BadRequest(new
+                        {
+                            Success = false,
                     Message = $"Błąd podczas czyszczenia logów: {ex.Message}"
                 });
             }
@@ -395,12 +416,12 @@ namespace ZkemAPI.Web.Controllers
                         if (!success)
                         {
                             throw new InvalidOperationException("Nie udało się zrestartować urządzenia");
-                        }
+                    }
 
                         return new { RestartTime = DateTime.Now };
-                    }
-                    finally
-                    {
+                }
+                finally
+                {
                         // Nie wywołujemy Disconnect() ponieważ urządzenie jest restartowane
                         // i połączenie zostanie automatycznie przerwane
                     }
@@ -444,18 +465,18 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         // Blokowanie urządzenia
                         device.EnableDevice(request.DeviceNumber, false);
 
                         // Odtwarzanie sygnału dźwiękowego
                         bool success = device.Beep(request.Duration);
-                        
-                        if (!success)
-                        {
+                    
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się odtworzyć sygnału dźwiękowego");
                         }
 
@@ -470,9 +491,9 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                    return Ok(new
+                    {
+                        Success = true,
                     Message = $"Sygnał dźwiękowy odtworzony przez {result.Duration}ms"
                 });
             }
@@ -532,14 +553,14 @@ namespace ZkemAPI.Web.Controllers
                         }
 
                         return new { VoiceIndex = request.VoiceIndex, Length = request.Length };
-                    }
-                    finally
-                    {
+                }
+                finally
+                {
                         // Odblokowujemy urządzenie przed rozłączeniem
                         device.EnableDevice(request.DeviceNumber, true);
                         // Rozłączamy się z czytnikiem
                         device.Disconnect();
-                    }
+                }
                 });
 
                 return Ok(new
@@ -568,7 +589,7 @@ namespace ZkemAPI.Web.Controllers
         public DateTime? DateTime { get; set; }
     }
 
-    public class DeviceRequest
+        public class DeviceRequest
     {
         public required string IpAddress { get; set; }
         public required int Port { get; set; }

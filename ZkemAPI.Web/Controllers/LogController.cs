@@ -32,37 +32,37 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
 
-                        var logs = new List<OperationLog>();
+                    var logs = new List<OperationLog>();
 
-                        int index = 0;
-                        int adminId = 0;
-                        int operation = 0;
-                        int param1 = 0, param2 = 0, param3 = 0;
-                        int year = 0, month = 0, day = 0;
-                        int hour = 0, minute = 0, second = 0;
+                    int index = 0;
+                    int adminId = 0;
+                    int operation = 0;
+                    int param1 = 0, param2 = 0, param3 = 0;
+                    int year = 0, month = 0, day = 0;
+                    int hour = 0, minute = 0, second = 0;
 
                         // Pobieranie logów operacji jeden po drugim
                         while (device.GetSuperLogData(
-                            request.DeviceNumber,
-                            ref index,
-                            ref adminId,
-                            ref operation,
-                            ref param1,
-                            ref param2,
-                            ref param3,
-                            ref year,
-                            ref month,
-                            ref day,
-                            ref hour,
-                            ref minute,
-                            ref second))
-                        {
+                        request.DeviceNumber,
+                        ref index,
+                        ref adminId,
+                        ref operation,
+                        ref param1,
+                        ref param2,
+                        ref param3,
+                        ref year,
+                        ref month,
+                        ref day,
+                        ref hour,
+                        ref minute,
+                        ref second))
+                    {
                             logs.Add(new OperationLog
                             {
                                 Index = index,
@@ -80,14 +80,14 @@ namespace ZkemAPI.Web.Controllers
                     {
                         device.EnableDevice(request.DeviceNumber, true);
                         device.Disconnect();
-                    }
+                        }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                    return Ok(new
+                    {
+                        Success = true,
                     Data = result
-                });
+                    });
             }
             catch (Exception ex)
             {

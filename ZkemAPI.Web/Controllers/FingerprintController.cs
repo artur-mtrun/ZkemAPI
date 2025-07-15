@@ -32,38 +32,38 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
 
-                        var fingerprints = new List<FingerprintData>();
+                    var fingerprints = new List<FingerprintData>();
                         device.ReadAllTemplate(request.DeviceNumber);
 
                         // Sprawdzamy każdy możliwy palec (0-9)
                         for (int fingerIndex = 0; fingerIndex < 10; fingerIndex++)
-                        {
+                    {
                             if (device.GetUserTmpExStr(request.DeviceNumber, request.EnrollNumber, fingerIndex, 
                                 out int flag, out string tmpData, out int tmpLength))
+                        {
+                            fingerprints.Add(new FingerprintData
                             {
-                                fingerprints.Add(new FingerprintData
-                                {
                                     FingerIndex = fingerIndex,
-                                    Flag = flag,
-                                    TemplateData = tmpData,
-                                    TemplateLength = tmpLength
-                                });
-                            }
+                                Flag = flag,
+                                TemplateData = tmpData,
+                                TemplateLength = tmpLength
+                            });
                         }
+                    }
 
                         return fingerprints;
-                    }
-                    finally
-                    {
+                }
+                finally
+                {
                         device.EnableDevice(request.DeviceNumber, true);
                         device.Disconnect();
-                    }
+                }
                 });
 
                 return Ok(new
@@ -95,24 +95,24 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
 
-                        foreach (var fingerprint in request.Fingerprints)
-                        {
+                    foreach (var fingerprint in request.Fingerprints)
+                    {
                             if (!device.SetUserTmpExStr(
-                                request.DeviceNumber, 
-                                request.EnrollNumber, 
-                                fingerprint.FingerIndex,
-                                fingerprint.Flag,
-                                fingerprint.TemplateData))
-                            {
+                            request.DeviceNumber, 
+                            request.EnrollNumber, 
+                            fingerprint.FingerIndex,
+                            fingerprint.Flag,
+                            fingerprint.TemplateData))
+                        {
                                 throw new InvalidOperationException($"Nie udało się zapisać odcisku palca dla palca {fingerprint.FingerIndex}");
-                            }
                         }
+                    }
                     }
                     finally
                     {
@@ -121,11 +121,11 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
-                    Message = "Odciski palców zostały zapisane pomyślnie"
-                });
+                    return Ok(new
+                    {
+                        Success = true,
+                        Message = "Odciski palców zostały zapisane pomyślnie"
+                    });
             }
             catch (Exception ex)
             {
@@ -150,55 +150,55 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
 
-                        var results = new List<BulkOperationResult>();
+                    var results = new List<BulkOperationResult>();
 
-                        foreach (var userFingerprints in request.UsersFingerprints)
+                    foreach (var userFingerprints in request.UsersFingerprints)
+                    {
+                        var userResult = new BulkOperationResult
                         {
-                            var userResult = new BulkOperationResult
-                            {
-                                EnrollNumber = userFingerprints.EnrollNumber,
-                                Success = true,
-                                Errors = new List<string>()
-                            };
+                            EnrollNumber = userFingerprints.EnrollNumber,
+                            Success = true,
+                            Errors = new List<string>()
+                        };
 
                             try
                             {
-                                foreach (var fingerprint in userFingerprints.Fingerprints)
-                                {
+                        foreach (var fingerprint in userFingerprints.Fingerprints)
+                        {
                                     if (!device.SetUserTmpExStr(
-                                        request.DeviceNumber,
-                                        userFingerprints.EnrollNumber,
-                                        fingerprint.FingerIndex,
-                                        fingerprint.Flag,
-                                        fingerprint.TemplateData))
-                                    {
-                                        userResult.Success = false;
-                                        userResult.Errors.Add($"Nie udało się zapisać odcisku palca {fingerprint.FingerIndex}");
-                                    }
+                                request.DeviceNumber,
+                                userFingerprints.EnrollNumber,
+                                fingerprint.FingerIndex,
+                                fingerprint.Flag,
+                                fingerprint.TemplateData))
+                            {
+                                userResult.Success = false;
+                                userResult.Errors.Add($"Nie udało się zapisać odcisku palca {fingerprint.FingerIndex}");
+                            }
                                 }
                             }
                             catch (Exception ex)
                             {
                                 userResult.Success = false;
                                 userResult.Errors.Add($"Błąd dla użytkownika {userFingerprints.EnrollNumber}: {ex.Message}");
-                            }
-
-                            results.Add(userResult);
                         }
 
-                        return results;
+                        results.Add(userResult);
                     }
-                    finally
-                    {
+
+                        return results;
+                }
+                finally
+                {
                         device.EnableDevice(request.DeviceNumber, true);
                         device.Disconnect();
-                    }
+                }
                 });
 
                 return Ok(new

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ZkemAPI.Core.Interfaces;
+using ZkemAPI.Core.Models;
 using ZkemAPI.SDK.Models;
 
 namespace ZkemAPI.SDK.Services
@@ -40,17 +41,30 @@ namespace ZkemAPI.SDK.Services
         }
 
         /// <summary>
-        /// Wykonuje operację na czytniku z synchronizacją dostępu i timeout'em
+        /// Wykonuje operację na czytniku z sprawdzaniem statusu (bez kolejkowania)
         /// </summary>
         public async Task<T> ExecuteDeviceOperationAsync<T>(string ipAddress, int port, Func<IZkemDevice, T> operation, CancellationToken cancellationToken)
         {
             var deviceKey = GetDeviceKey(ipAddress, port);
             var deviceSemaphore = GetOrCreateDeviceSemaphore(deviceKey);
 
-            _logger.LogDebug("Oczekiwanie na dostęp do czytnika {DeviceKey}. Oczekujące operacje: {PendingCount}", 
-                deviceKey, deviceSemaphore.Semaphore.CurrentCount);
+            _logger.LogDebug("Sprawdzanie dostępności czytnika {DeviceKey}", deviceKey);
 
-            await deviceSemaphore.Semaphore.WaitAsync(cancellationToken);
+            // Sprawdź czy semaphore jest dostępny (nie kolejkuj)
+            if (deviceSemaphore.Semaphore.CurrentCount == 0)
+            {
+                _logger.LogDebug("Czytnik {DeviceKey} jest zajęty - operacja odrzucona", deviceKey);
+                var busyStatus = DeviceStatusResponse.CreateBusy(ipAddress, port, 60);
+                throw new DeviceBusyException(busyStatus);
+            }
+
+            // Próbuj zdobyć semaphore bez oczekiwania
+            if (!deviceSemaphore.Semaphore.Wait(0))
+            {
+                _logger.LogDebug("Czytnik {DeviceKey} został zajęty w międzyczasie - operacja odrzucona", deviceKey);
+                var busyStatus = DeviceStatusResponse.CreateBusy(ipAddress, port, 60);
+                throw new DeviceBusyException(busyStatus);
+            }
 
             try
             {
@@ -65,11 +79,20 @@ namespace ZkemAPI.SDK.Services
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 _logger.LogWarning("Operacja na czytniku {DeviceKey} została anulowana z powodu timeout'a", deviceKey);
-                throw new TimeoutException($"Operacja na czytniku {deviceKey} przekroczyła limit czasu {_deviceSettings.ConnectionTimeoutMinutes} minut");
+                var timeoutStatus = DeviceStatusResponse.CreateOffline(ipAddress, port, "Timeout operacji");
+                throw new DeviceOfflineException(timeoutStatus);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is DeviceBusyException || ex is DeviceOfflineException))
             {
                 _logger.LogError(ex, "Błąd podczas operacji na czytniku {DeviceKey}", deviceKey);
+                
+                // Sprawdź czy to błąd połączenia
+                if (ex.Message.Contains("połączy") || ex.Message.Contains("connect"))
+                {
+                    var offlineStatus = DeviceStatusResponse.CreateOffline(ipAddress, port, $"Błąd połączenia: {ex.Message}");
+                    throw new DeviceOfflineException(offlineStatus);
+                }
+                
                 throw;
             }
             finally

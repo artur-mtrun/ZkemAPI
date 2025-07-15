@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using ZkemAPI.Core.Interfaces;
 using ZkemAPI.Core.Models;
 
@@ -37,45 +41,45 @@ namespace ZkemAPI.Web.Controllers
                     {
                         _logger.LogError("Nie udało się połączyć z czytnikiem {IpAddress}:{Port}", request.IpAddress, request.Port);
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         // Blokowanie urządzenia
                         device.EnableDevice(request.DeviceNumber, false);
 
                         // Pobieranie danych pracownika
-                        string name = string.Empty;
-                        string password = string.Empty;
-                        string cardNumber = string.Empty;
-                        int privilege = 0;
-                        bool enabled = false;
+                    string name = string.Empty;
+                    string password = string.Empty;
+                    string cardNumber = string.Empty;
+                    int privilege = 0;
+                    bool enabled = false;
 
                         bool success = device.SSR_GetUserInfo(
-                            request.DeviceNumber,
-                            request.EnrollNumber,
-                            out name,
-                            out password,
-                            out privilege,
-                            out enabled);
+                        request.DeviceNumber,
+                        request.EnrollNumber,
+                        out name,
+                        out password,
+                        out privilege,
+                        out enabled);
 
-                        if (!success)
-                        {
+                    if (!success)
+                    {
                             throw new KeyNotFoundException("Nie znaleziono pracownika o podanym numerze ewidencyjnym");
-                        }
+                    }
 
                         // Pobieranie numeru karty
                         device.GetStrCardNumber(out cardNumber);
 
                         return new UserInfo
-                        {
-                            EnrollNumber = request.EnrollNumber,
-                            Name = name,
-                            CardNumber = cardNumber,
-                            Password = password,
-                            Privilege = privilege,
-                            Enabled = enabled
-                        };
+                    {
+                        EnrollNumber = request.EnrollNumber,
+                        Name = name,
+                        CardNumber = cardNumber,
+                        Password = password,
+                        Privilege = privilege,
+                        Enabled = enabled
+                    };
                     }
                     finally
                     {
@@ -89,7 +93,27 @@ namespace ZkemAPI.Web.Controllers
                 return Ok(new
                 {
                     Success = true,
-                    Data = result
+                    Data = result,
+                    DeviceStatus = "Online"
+                });
+            }
+            catch (DeviceBusyException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString(),
+                    EstimatedWaitTime = ex.Status.EstimatedWaitTimeSeconds
+                });
+            }
+            catch (DeviceOfflineException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString()
                 });
             }
             catch (KeyNotFoundException ex)
@@ -97,7 +121,8 @@ namespace ZkemAPI.Web.Controllers
                 return NotFound(new
                 {
                     Success = false,
-                    Message = ex.Message
+                    Message = ex.Message,
+                    DeviceStatus = "Online"
                 });
             }
             catch (Exception ex)
@@ -107,7 +132,8 @@ namespace ZkemAPI.Web.Controllers
                 return StatusCode(500, new
                 {
                     Success = false,
-                    Message = $"Błąd podczas pobierania danych pracownika: {ex.Message}"
+                    Message = $"Błąd podczas pobierania danych pracownika: {ex.Message}",
+                    DeviceStatus = "Unknown"
                 });
             }
         }
@@ -128,21 +154,21 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         // Blokowanie urządzenia
                         device.EnableDevice(request.DeviceNumber, false);
 
-                        var employees = new List<UserInfo>();
+                    var employees = new List<UserInfo>();
 
                         // Pobieranie danych wszystkich pracowników
                         bool success = device.ReadAllUserID(request.DeviceNumber);
-                        if (!success)
-                        {
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się odczytać listy pracowników");
-                        }
+                    }
 
                         // Iteracja przez wszystkich użytkowników
                         string enrollNumber, name, password;
@@ -151,36 +177,56 @@ namespace ZkemAPI.Web.Controllers
 
                         while (device.SSR_GetAllUserInfo(request.DeviceNumber, out enrollNumber, out name, 
                                out password, out privilege, out enabled))
-                        {
-                            string cardNumber = string.Empty;
+                    {
+                        string cardNumber = string.Empty;
                             device.GetStrCardNumber(out cardNumber);
 
-                            employees.Add(new UserInfo
-                            {
-                                EnrollNumber = enrollNumber,
-                                Name = name,
-                                CardNumber = cardNumber,
-                                Password = password,
-                                Privilege = privilege,
-                                Enabled = enabled
-                            });
-                        }
+                        employees.Add(new UserInfo
+                        {
+                            EnrollNumber = enrollNumber,
+                            Name = name,
+                            CardNumber = cardNumber,
+                            Password = password,
+                            Privilege = privilege,
+                            Enabled = enabled
+                        });
+                    }
 
                         return employees.OrderBy(x => int.TryParse(x.EnrollNumber, out int num) ? num : int.MaxValue);
-                    }
-                    finally
-                    {
+                }
+                finally
+                {
                         // Odblokowujemy urządzenie przed rozłączeniem
                         device.EnableDevice(request.DeviceNumber, true);
                         // Rozłączamy się z czytnikiem
                         device.Disconnect();
-                    }
+                }
                 });
 
                 return Ok(new
                 {
                     Success = true,
-                    Data = result
+                    Data = result,
+                    DeviceStatus = "Online"
+                });
+            }
+            catch (DeviceBusyException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString(),
+                    EstimatedWaitTime = ex.Status.EstimatedWaitTimeSeconds
+                });
+            }
+            catch (DeviceOfflineException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString()
                 });
             }
             catch (Exception ex)
@@ -188,7 +234,8 @@ namespace ZkemAPI.Web.Controllers
                 return StatusCode(500, new
                 {
                     Success = false,
-                    Message = $"Błąd podczas pobierania danych pracowników: {ex.Message}"
+                    Message = $"Błąd podczas pobierania danych pracowników: {ex.Message}",
+                    DeviceStatus = "Unknown"
                 });
             }
         }
@@ -210,18 +257,18 @@ namespace ZkemAPI.Web.Controllers
                         if (!device.Connect_Net(request.IpAddress, request.Port))
                         {
                             throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                        }
+                    }
 
-                        try
-                        {
+                    try
+                    {
                             device.EnableDevice(request.DeviceNumber, false);
 
                             // Pobieramy listę wszystkich pracowników
                             bool success = device.ReadAllUserID(request.DeviceNumber);
-                            if (!success)
-                            {
+                        if (!success)
+                        {
                                 throw new InvalidOperationException("Nie udało się odczytać listy pracowników");
-                            }
+                        }
 
                             // Sprawdzamy czy karta nie jest już przypisana do innego użytkownika
                             string enrollNumber, name, password;
@@ -230,7 +277,7 @@ namespace ZkemAPI.Web.Controllers
 
                             while (device.SSR_GetAllUserInfo(request.DeviceNumber, out enrollNumber, out name, 
                                    out password, out privilege, out enabled))
-                            {
+                        {
                                 string existingCardNumber = string.Empty;
                                 device.GetStrCardNumber(out existingCardNumber);
 
@@ -239,35 +286,35 @@ namespace ZkemAPI.Web.Controllers
                                     enrollNumber != request.EnrollNumber)
                                 {
                                     throw new InvalidOperationException($"Karta {request.CardNumber} jest już przypisana do pracownika {enrollNumber} ({name})");
-                                }
                             }
+                        }
 
                             // Sprawdzamy czy pracownik istnieje
-                            string existingName = string.Empty;
-                            string existingPassword = string.Empty;
-                            int existingPrivilege = 0;
-                            bool existingEnabled = false;
+                        string existingName = string.Empty;
+                        string existingPassword = string.Empty;
+                        int existingPrivilege = 0;
+                        bool existingEnabled = false;
 
                             bool exists = device.SSR_GetUserInfo(
-                                request.DeviceNumber,
-                                request.EnrollNumber,
-                                out existingName,
-                                out existingPassword,
-                                out existingPrivilege,
-                                out existingEnabled);
+                            request.DeviceNumber,
+                            request.EnrollNumber,
+                            out existingName,
+                            out existingPassword,
+                            out existingPrivilege,
+                            out existingEnabled);
 
                             // Zapisywanie danych pracownika z kartą
                             bool saveSuccess = device.SSR_SetUserInfo(
-                                request.DeviceNumber,
-                                request.EnrollNumber,
-                                request.Name,
+                            request.DeviceNumber,
+                            request.EnrollNumber,
+                            request.Name,
                                 request.Password ?? string.Empty,
-                                request.Privilege,
-                                request.Enabled,
-                                request.CardNumber);
+                            request.Privilege,
+                            request.Enabled,
+                            request.CardNumber);
 
                             if (!saveSuccess)
-                            {
+                        {
                                 throw new InvalidOperationException("Nie udało się zapisać danych pracownika");
                             }
 
@@ -280,9 +327,9 @@ namespace ZkemAPI.Web.Controllers
                         }
                     });
 
-                    return Ok(new
-                    {
-                        Success = true,
+                        return Ok(new
+                        {
+                            Success = true,
                         Message = result
                     });
                 }
@@ -311,38 +358,38 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
 
-                        // Sprawdzamy czy pracownik istnieje
-                        string existingName = string.Empty;
-                        string existingPassword = string.Empty;
-                        int existingPrivilege = 0;
-                        bool existingEnabled = false;
+                    // Sprawdzamy czy pracownik istnieje
+                    string existingName = string.Empty;
+                    string existingPassword = string.Empty;
+                    int existingPrivilege = 0;
+                    bool existingEnabled = false;
 
                         bool exists = device.SSR_GetUserInfo(
-                            request.DeviceNumber,
-                            request.EnrollNumber,
-                            out existingName,
-                            out existingPassword,
-                            out existingPrivilege,
-                            out existingEnabled);
+                        request.DeviceNumber,
+                        request.EnrollNumber,
+                        out existingName,
+                        out existingPassword,
+                        out existingPrivilege,
+                        out existingEnabled);
 
                         // Zapisywanie danych pracownika
                         bool success = device.SSR_SetUserInfo(
-                            request.DeviceNumber,
-                            request.EnrollNumber,
-                            request.Name,
+                        request.DeviceNumber,
+                        request.EnrollNumber,
+                        request.Name,
                             request.Password ?? string.Empty,
-                            request.Privilege,
-                            request.Enabled,
+                        request.Privilege,
+                        request.Enabled,
                             request.CardNumber ?? string.Empty);
 
-                        if (!success)
-                        {
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się zapisać danych pracownika");
                         }
 
@@ -355,9 +402,9 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                    return Ok(new
+                    {
+                        Success = true,
                     Message = result
                 });
             }
@@ -384,42 +431,42 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
 
                         // Pobieramy aktualne dane pracownika
-                        string name = string.Empty;
-                        string password = string.Empty;
-                        string cardNumber = string.Empty;
-                        int privilege = 0;
-                        bool enabled = false;
+                    string name = string.Empty;
+                    string password = string.Empty;
+                    string cardNumber = string.Empty;
+                    int privilege = 0;
+                    bool enabled = false;
 
                         bool exists = device.SSR_GetUserInfo(
-                            request.DeviceNumber,
-                            request.OldEnrollNumber,
-                            out name,
-                            out password,
-                            out privilege,
-                            out enabled);
+                        request.DeviceNumber,
+                        request.OldEnrollNumber,
+                        out name,
+                        out password,
+                        out privilege,
+                        out enabled);
 
-                        if (!exists)
-                        {
+                    if (!exists)
+                    {
                             throw new KeyNotFoundException("Nie znaleziono pracownika o podanym starym numerze ewidencyjnym");
-                        }
+                    }
 
                         // Sprawdzamy czy nowy numer nie jest już zajęty
                         exists = device.SSR_GetUserInfo(
-                            request.DeviceNumber,
-                            request.NewEnrollNumber,
-                            out _, out _, out _, out _);
+                        request.DeviceNumber,
+                        request.NewEnrollNumber,
+                        out _, out _, out _, out _);
 
-                        if (exists)
-                        {
+                    if (exists)
+                    {
                             throw new InvalidOperationException("Nowy numer ewidencyjny jest już zajęty");
-                        }
+                    }
 
                         // Pobieramy numer karty
                         device.GetStrCardNumber(out cardNumber);
@@ -429,16 +476,16 @@ namespace ZkemAPI.Web.Controllers
 
                         // Dodajemy pracownika z nowym numerem
                         bool success = device.SSR_SetUserInfo(
-                            request.DeviceNumber,
-                            request.NewEnrollNumber,
-                            name,
-                            password,
-                            privilege,
-                            enabled,
-                            cardNumber);
+                        request.DeviceNumber,
+                        request.NewEnrollNumber,
+                        name,
+                        password,
+                        privilege,
+                        enabled,
+                        cardNumber);
 
-                        if (!success)
-                        {
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się utworzyć pracownika z nowym numerem ewidencyjnym");
                         }
                     }
@@ -449,12 +496,12 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
-                    Message = "Numer ewidencyjny pracownika został zmieniony pomyślnie"
-                });
-            }
+                    return Ok(new
+                    {
+                        Success = true,
+                        Message = "Numer ewidencyjny pracownika został zmieniony pomyślnie"
+                    });
+                }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new
@@ -496,15 +543,15 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         device.EnableDevice(request.DeviceNumber, false);
-                        var results = new List<object>();
+                    var results = new List<object>();
 
-                        foreach (var employee in request.Employees)
-                        {
+                    foreach (var employee in request.Employees)
+                    {
                             try
                             {
                                 // Sprawdzamy czy pracownik istnieje
@@ -523,7 +570,7 @@ namespace ZkemAPI.Web.Controllers
 
                                 // Zapisywanie danych pracownika
                                 bool success = device.SSR_SetUserInfo(
-                                    request.DeviceNumber,
+                                request.DeviceNumber,
                                     employee.EnrollNumber,
                                     employee.Name,
                                     employee.Password ?? string.Empty,
@@ -553,11 +600,11 @@ namespace ZkemAPI.Web.Controllers
                                 }
                             }
                             catch (Exception ex)
+                        {
+                            results.Add(new
                             {
-                                results.Add(new
-                                {
                                     EnrollNumber = employee.EnrollNumber,
-                                    Success = false,
+                                Success = false,
                                     Message = ex.Message,
                                     Action = "Error"
                                 });
@@ -573,12 +620,12 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
+                    return Ok(new
+                    {
+                        Success = true,
                     Message = "Operacja grupowa zakończona",
                     Data = result
-                });
+                    });
             }
             catch (Exception ex)
             {
@@ -604,40 +651,40 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         // Blokowanie urządzenia
                         device.EnableDevice(request.DeviceNumber, false);
 
                         // Sprawdzamy czy pracownik istnieje
-                        string name = string.Empty;
-                        string password = string.Empty;
-                        int privilege = 0;
-                        bool enabled = false;
+                    string name = string.Empty;
+                    string password = string.Empty;
+                    int privilege = 0;
+                    bool enabled = false;
 
                         bool exists = device.SSR_GetUserInfo(
-                            request.DeviceNumber,
-                            request.EnrollNumber,
-                            out name,
-                            out password,
-                            out privilege,
-                            out enabled);
+                        request.DeviceNumber,
+                        request.EnrollNumber,
+                        out name,
+                        out password,
+                        out privilege,
+                        out enabled);
 
-                        if (!exists)
-                        {
+                    if (!exists)
+                    {
                             throw new KeyNotFoundException("Nie znaleziono pracownika o podanym numerze ewidencyjnym");
-                        }
+                    }
 
                         // Usuwamy pracownika
                         bool success = device.SSR_DeleteEnrollData(
-                            request.DeviceNumber,
-                            request.EnrollNumber,
-                            12); // 12 = wszystkie dane użytkownika
+                        request.DeviceNumber,
+                        request.EnrollNumber,
+                        12); // 12 = wszystkie dane użytkownika
 
-                        if (!success)
-                        {
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się usunąć pracownika");
                         }
                     }
@@ -650,12 +697,12 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
-                    Message = "Pracownik został usunięty pomyślnie"
-                });
-            }
+                    return Ok(new
+                    {
+                        Success = true,
+                        Message = "Pracownik został usunięty pomyślnie"
+                    });
+                }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new
@@ -688,18 +735,18 @@ namespace ZkemAPI.Web.Controllers
                     if (!device.Connect_Net(request.IpAddress, request.Port))
                     {
                         throw new InvalidOperationException("Nie udało się połączyć z czytnikiem");
-                    }
+                }
 
-                    try
-                    {
+                try
+                {
                         // Blokowanie urządzenia
                         device.EnableDevice(request.DeviceNumber, false);
 
                         // Usuwamy wszystkich pracowników (5 = wszystkie dane użytkowników)
                         bool success = device.ClearData(request.DeviceNumber, 5);
-                        
-                        if (!success)
-                        {
+                    
+                    if (!success)
+                    {
                             throw new InvalidOperationException("Nie udało się usunąć danych pracowników");
                         }
                     }
@@ -712,11 +759,11 @@ namespace ZkemAPI.Web.Controllers
                     }
                 });
 
-                return Ok(new
-                {
-                    Success = true,
-                    Message = "Wszyscy pracownicy zostali usunięci pomyślnie"
-                });
+                    return Ok(new
+                    {
+                        Success = true,
+                        Message = "Wszyscy pracownicy zostali usunięci pomyślnie"
+                    });
             }
             catch (Exception ex)
             {

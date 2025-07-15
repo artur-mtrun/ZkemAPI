@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using ZkemAPI.Core.Interfaces;
 using ZkemAPI.Core.Models;
@@ -84,7 +88,27 @@ namespace ZkemAPI.Web.Controllers
                 return Ok(new
                 {
                     Success = true,
-                    Data = result
+                    Data = result,
+                    DeviceStatus = "Online"
+                });
+            }
+            catch (DeviceBusyException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString(),
+                    EstimatedWaitTime = ex.Status.EstimatedWaitTimeSeconds
+                });
+            }
+            catch (DeviceOfflineException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString()
                 });
             }
             catch (Exception ex)
@@ -92,7 +116,8 @@ namespace ZkemAPI.Web.Controllers
                 return StatusCode(500, new
                 {
                     Success = false,
-                    Message = $"Błąd podczas pobierania logów: {ex.Message}"
+                    Message = $"Błąd podczas pobierania logów: {ex.Message}",
+                    DeviceStatus = "Unknown"
                 });
             }
         }
@@ -160,7 +185,27 @@ namespace ZkemAPI.Web.Controllers
                 return Ok(new
                 {
                     Success = true,
-                    Data = result
+                    Data = result,
+                    DeviceStatus = "Online"
+                });
+            }
+            catch (DeviceBusyException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString(),
+                    EstimatedWaitTime = ex.Status.EstimatedWaitTimeSeconds
+                });
+            }
+            catch (DeviceOfflineException ex)
+            {
+                return BadRequest(new
+                {
+                    Success = false,
+                    Message = ex.Status.Description,
+                    DeviceStatus = ex.Status.Status.ToString()
                 });
             }
             catch (Exception ex)
@@ -168,7 +213,8 @@ namespace ZkemAPI.Web.Controllers
                 return StatusCode(500, new
                 {
                     Success = false,
-                    Message = $"Błąd podczas pobierania logów: {ex.Message}"
+                    Message = $"Błąd podczas pobierania logów: {ex.Message}",
+                    DeviceStatus = "Unknown"
                 });
             }
         }
